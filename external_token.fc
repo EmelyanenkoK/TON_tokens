@@ -1,0 +1,109 @@
+(slice) get_address () asm "MYADDR";
+(int, int) parse_address (slice) asm "REWRITESTDADDR";
+
+(int, cell, int, cell) load_data () inline {
+  var cs = get_data().begin_parse();
+  (int init, cell balances, int fee_per_send, cell pending_queries) = (cs~load_int(1), cs~load_dict(), cs~load_grams(), cs~load_dict());
+  return (init, balances, fee_per_send, pending_queries); 
+}
+
+() save_data (cell balances, int fee_per_send, cell pending_queries) inline {
+  cell storage = begin_cell().store_int(-1, 1)
+                             .store_dict(balances)
+                             .store_grams(fee_per_send)
+                             .store_dict(pending_queries)
+                 .end_cell();
+  set_data(storage);
+}
+
+int get_uniq_token () inline {
+  (int wc, int hsh) = parse_address(get_address());
+  return (hsh >> 192);
+}
+
+(cell, ()) ~remember_query(cell pending_queries, int query_id) inline {
+  pending_queries~udict_set_builder(64, query_id, begin_cell());
+  return (pending_queries, ());
+}
+
+(cell, (int)) ~clean_expired_queries(cell pending_queries, int bound) inline {
+  bound -= (64 << 32);   ;; clean up records expired more than 64 seconds ago
+  int need_save = 0;
+  do {
+    var (pending_queries', i, _, f) = pending_queries.udict_delete_get_min(64);
+    f~touch();
+    if (f) {
+      f = (i < bound);
+    }
+    if (f) {
+      pending_queries = pending_queries';
+      need_save = -1;
+    }
+  } until (~ f);
+  return (pending_queries, (need_save));
+}
+
+
+() recv_external (slice in_msg) {
+  (int init, cell balances, int fee_per_send, cell pending_queries) = load_data();
+  ifnot(init) {
+    accept_message();
+    save_data(balances, fee_per_send, pending_queries);
+    return ();
+  }
+  slice signature = in_msg~load_bits(512);
+  slice cs = in_msg;
+  (int query_id, int op, int pubkey, int uniq_token) = (cs~load_uint(64), cs~load_uint(8), cs~load_uint(256), cs~load_uint(64));
+  var bound = (now() << 32);
+  throw_if(33, query_id < bound);  
+
+  int order_hash = slice_hash(cs);
+  throw_unless(34, check_signature(order_hash, signature, pubkey));
+  int sender_id = pubkey; ;; just alias
+  throw_unless(44, uniq_token == get_uniq_token());  
+  (slice sender_balance_cell, int sender_found) = balances.udict_get?(256, sender_id);
+  (_, int has_query) = pending_queries.udict_get?(64, query_id);
+  throw_if(47, has_query);
+  throw_unless(41, sender_found);
+  if( op == 0 ) { ;; simple send
+    int sender_balance = sender_balance_cell~load_grams();
+    throw_if(42, sender_balance < fee_per_send);
+    sender_balance -= fee_per_send;
+    cs = cs~load_ref().begin_parse();
+    (int amount, int payee_id) = (cs~load_grams(), cs~load_uint(256));
+    throw_if(45, sender_balance < amount);
+    int payee_balance = 0;
+    (slice payee_balance_cell, int payee_found) = balances.udict_get?(256, payee_id);
+    if(payee_found) {
+      payee_balance = payee_balance_cell~load_grams();
+    }
+    int new_payee_balance = payee_balance + amount;
+    throw_if(46, new_payee_balance > 18446744073709551615);
+    if(sender_balance == amount) {
+      balances~udict_delete?(256, sender_id);
+    } else {
+      balances~udict_set_builder(256, sender_id, begin_cell().store_grams(sender_balance - amount));
+    }
+    if(new_payee_balance > 0) {
+      ;; Zero-token transfers are not prohibited, but 0 balance will not be explicitly stored
+      balances~udict_set_builder(256, payee_id, begin_cell().store_grams(new_payee_balance));
+    }
+    pending_queries~remember_query(query_id);
+    pending_queries~clean_expired_queries(bound);
+    save_data(balances, fee_per_send, pending_queries);     
+    accept_message();  
+  }
+}
+
+() recv_internal (int msg_value, cell in_msg_cell, slice in_msg) {
+;;
+}
+
+(int) balanceOf (int user_id) method_id {
+  (int init, cell balances, int fee_per_send, cell pending_queries) = load_data();
+  (slice user_balance_cell, int user_found) = balances.udict_get?(256, user_id);
+  ifnot(user_found) {
+    return 0;
+  }
+  return user_balance_cell~load_grams();
+}

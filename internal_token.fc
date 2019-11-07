@@ -1,0 +1,117 @@
+(int, cell) load_data () inline {
+  var cs = get_data().begin_parse();
+  (int init, cell balances) = (cs~load_int(1), cs~load_dict());
+  return (init, balances); 
+}
+
+() save_data (balances) inline {
+  cell storage = begin_cell().store_int(-1, 1)
+                             .store_dict(balances)
+                 .end_cell();
+  set_data(storage);
+}
+
+() bounce_message (int operation, int query_id) inline {
+  var msg = begin_cell()
+		.store_uint (0x18, 6)
+		.store_uint (0, 2 + 4 + 1 + 4 + 4 + 64 + 32 + 1 + 1)
+		.store_uint (operation & 0x80000000, 32)
+		.store_uint (query_id, 64)
+            .end_cell();
+  send_raw_message(msg, 64);
+}
+() bounce_message_with_data (int operation, int query_id, slice data) inline {
+  var msg = begin_cell()
+		.store_uint (0x18, 6)
+		.store_uint (0, 2 + 4 + 1 + 4 + 4 + 64 + 32 + 1 + 1)
+		.store_uint (operation & 0x80000000, 32)
+		.store_uint (query_id, 64)
+                .store_slice (data) ;; TODO check empty bits
+            .end_cell();
+  send_raw_message(msg, 64);
+}
+
+
+() recv_external (slice in_msg) {
+  (int init, cell balances) = load_data();
+  ifnot(init) {
+    accept_message();
+    save_data(balances);
+    return ();
+  }
+}
+
+() recv_internal (int msg_value, cell in_msg_cell, slice in_msg) {
+  var cs = in_msg_cell.begin_parse();
+  var flags = cs~load_uint(4);  ;; int_msg_info$0 ihr_disabled:Bool bounce:Bool bounced:Bool
+  if (flags & 1) {
+    ;; ignore all bounced messages
+    return ();
+  }
+  var s_addr = cs~load_msg_addr();
+  if (in_msg.slice_empty?()) {
+    ;; keep money as donation
+    return ();
+  }
+  int op = in_msg~load_uint(32);
+  if ( op == 0) {
+    return ();
+  }
+  if (op == 1) {
+    (int init, cell balances) = load_data();
+    int sender_id = slice_hash(s_addr);
+    (slice sender_balance_cell, int sender_found) = balances.udict_get?(256, sender_id);
+    throw_unless(41, sender_found);
+    (int query_id, int amount, int payee_id) = (in_msg~load_uint(64), in_msg~load_grams(), in_msg~load_uint(256));
+    int sender_balance =  sender_balance_cell~load_grams();
+    throw_if(42, amount > sender_balance);
+    (slice payee_balance_cell, int payee_found) = balances.udict_get?(256, payee_id);
+    int payee_balance = 0;
+    if(payee_found) {
+      payee_balance = payee_balance_cell~load_grams();
+    }
+    int new_payee_balance = payee_balance + amount;
+    throw_if(43, new_payee_balance > 18446744073709551615);
+    if(sender_balance == amount) {
+      balances.udict_delete?(256, sender_id);
+    } else {
+      balances~udict_set_builder(256, sender_id, begin_cell().store_grams(sender_balance - amount));
+    }
+    if(new_payee_balance > 0) {
+      ;; Zero-token transfers are not prohibited, but 0 balance will not be explicitly stored
+      balances~udict_set_builder(256, payee_id, begin_cell().store_grams(new_payee_balance));
+    }
+    save_data(balances);
+    bounce_message(op, query_id);
+    return ();
+  }
+  if (op == 2) {
+    (int init, cell balances) = load_data();
+    int user_id = slice_hash(s_addr);
+    (slice user_balance_cell, int user_found) = balances.udict_get?(256, user_id);
+    throw_unless(41, user_found);
+    int query_id = in_msg~load_uint(64);
+    ;; int user_balance =  user_balance_cell~load_grams();
+    bounce_message_with_data(op, query_id, user_balance_cell);
+    return ();
+  }
+  bounce_message( 0xffffffff, 0); ;; Unknown operation
+}
+
+(int) balanceOf (int user_id) method_id {
+  (int init, cell balances) = load_data();
+  (slice user_balance_cell, int user_found) = balances.udict_get?(256, user_id);
+  ifnot(user_found) {
+    return 0;
+  }
+  return user_balance_cell~load_grams();
+}
+
+(int) balanceOfAddress (int workchain, int addr_hash) method_id {
+  var addr = begin_cell()
+		.store_uint (0x4, 3)
+		.store_uint (workchain, 8)
+		.store_uint (addr_hash, 256)
+            .end_cell();
+  return balanceOf(cell_hash(addr));
+}
