@@ -73,7 +73,7 @@
     int new_payee_balance = payee_balance + amount;
     throw_if(43, new_payee_balance > 18446744073709551615);
     if(sender_balance == amount) {
-      balances.udict_delete?(256, sender_id);
+      balances~udict_delete?(256, sender_id);
     } else {
       balances~udict_set_builder(256, sender_id, begin_cell().store_grams(sender_balance - amount));
     }
