@@ -1,0 +1,37 @@
+#!/usr/bin/fift -s
+"TonUtil.fif" include
+"Asm.fif" include
+
+$1 parse-int =: workchain
+$2 parse-int =: first_owner_pubkey
+$3 $>GR =: first_owner_balance
+$4 $>GR =: fee_per_send
+
+
+
+"external_token.fif" include <s =: contract_code
+
+<b first_owner_balance Gram, b> <s
+first_owner_pubkey
+dictnew
+256
+udict!
+drop
+
+<b 0 1 u, swap dict, fee_per_send Gram, dictnew dict, b> =: contract_storage 
+<b b{00110} s, <b contract_code s, b> ref, contract_storage ref, b>
+dup =: state_init
+
+dup hashu workchain swap 2constant contract_address
+."new token address = " contract_address .addr cr
+
+
+."Non-bounceable address (for init): " contract_address 7 .Addr cr
+."Bounceable address (for later access): " contract_address 6 .Addr cr
+
+<b b{1000100} s, contract_address addr, b{000010} s, state_init <s s, b{0} s, b>
+2 boc+>B
+
+"external_token_creation_query.boc" tuck B>file
+."(Saved token contract creating query to file " type .")" cr
+

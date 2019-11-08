@@ -1,0 +1,35 @@
+#!/usr/bin/fift -s
+"TonUtil.fif" include
+"Asm.fif" include
+
+true constant bounce
+$1 bounce parse-load-address =: bounce 2=: first_owner_addr
+$2 $>GR =: first_owner_balance
+
+
+"internal_token.fif" include <s =: contract_code
+
+<b first_owner_balance Gram, b> <s
+<b b{10} s, b{0} s, first_owner_addr addr, b> hashu
+dictnew
+256
+udict!
+drop
+
+<b 0 1 u, swap dict, b> =: contract_storage 
+<b b{00110} s, <b contract_code s, b> ref, contract_storage ref, b>
+dup =: state_init
+
+dup hashu first_owner_addr drop swap 2constant contract_address
+."new token address = " contract_address .addr cr
+
+
+."Non-bounceable address (for init): " contract_address 7 .Addr cr
+."Bounceable address (for later access): " contract_address 6 .Addr cr
+
+<b b{1000100} s, contract_address addr, b{000010} s, state_init <s s, b{0} s, b>
+2 boc+>B
+
+"internal_token_creation_query.boc" tuck B>file
+."(Saved token contract creating query to file " type .")" cr
+
