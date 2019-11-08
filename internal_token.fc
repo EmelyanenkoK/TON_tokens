@@ -87,10 +87,9 @@
   }
   if (op == 2) {
     (int init, cell balances) = load_data();
-    int user_id = slice_hash(s_addr);
+    (int query_id, int user_id) = (in_msg~load_uint(64), in_msg~load_uint(256));
     (slice user_balance_cell, int user_found) = balances.udict_get?(256, user_id);
     throw_unless(41, user_found);
-    int query_id = in_msg~load_uint(64);
     ;; int user_balance =  user_balance_cell~load_grams();
     bounce_message_with_data(op, query_id, user_balance_cell);
     return ();
