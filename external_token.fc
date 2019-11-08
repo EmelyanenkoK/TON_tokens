@@ -63,7 +63,7 @@ int get_uniq_token () inline {
   var bound = (now() << 32);
   throw_if(33, query_id < bound);  
 
-  int order_hash = slice_hash(cs);
+  int order_hash = slice_hash(in_msg);
   throw_unless(34, check_signature(order_hash, signature, pubkey));
   int sender_id = pubkey; ;; just alias
   throw_unless(44, uniq_token == get_uniq_token());  
