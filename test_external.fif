@@ -1,0 +1,78 @@
+#!/usr/bin/fift -s
+"TonUtil.fif" include
+"Asm.fif" include
+
+{
+  file>B dup Blen 32 <> abort"Private key must be exactly 32 bytes long"
+  dup priv>pub swap 
+} : load-keypair'
+// ( fname -- pubkey privkey )
+{ dup file-exists?
+  { load-keypair' }
+  { dup newkeypair swap rot over swap B>file
+    rot drop 
+  } cond
+} : load-generate-keypair'
+{ load-generate-keypair' swap 256 B>u@ } : nkp
+
+// low_bound up_bound
+{ 2dup newkeypair drop 256 B>u@ -rot swap - mod swap drop + } : random_int
+
+{ dup rot dup rot = { drop drop } { "Error: Got " swap (.) $+ " should be " $+ swap (.) $+ abort } cond } : should_be
+
+0 =: workchain
+"p01.pk" nkp =: first_owner_pubkey =: first_owner_privkey 
+"p02.pk" nkp =: second_owner_pubkey =: second_owner_privkey 
+15 1000000000 * =: first_owner_balance
+100 =: fee_per_send
+
+0xC7EAFBC106A7AA4BA3D16007C6AC64CAAC1078B4A43577339E246F466405E896 =: contract_address_int
+contract_address_int 6277101735386680763835789423207666416102355444464034512896 / constant uniq_token
+<b b{100} s, workchain 8 u, contract_address_int 256 u, b> <s =: contract_address_full
+0 tuple 0x076ef1ea , // magic
+0 , 0 , // actions msg_sents
+1570470873 , // unix_time
+1 , 1 , 0 , // block_lt, trans_lt, rand_seed
+ 0 tuple 9223372036854775807 , dictnew , , // remaining balance
+contract_address_full , dictnew , // contract_address, global_config
+1 tuple // wrap to another tuple
+constant c7
+
+
+"external_token.fif" include <s =: contract_code
+
+<b first_owner_balance Gram, b> <s
+first_owner_pubkey
+dictnew
+256
+udict!
+drop
+<b 1 1 u, swap dict, fee_per_send Gram, dictnew dict, b> =: contract_storage 
+
+96915 =: balanceOf_code
+-1 =: recv_external
+
+// storage pubkey -> nanotokens 
+{ balanceOf_code contract_code 3 roll c7 runvmctx drop 0 should_be } : balanceOf
+
+contract_storage first_owner_pubkey balanceOf 
+first_owner_balance should_be
+
+// storage src_private_key src_pubkey dest_pubkey amount -> new_storage code
+{ 
+<b swap Gram, swap 256 u, b>
+<b now 32 u, 0 100000 random_int 32 u, 0 8 u, rot 256 u, uniq_token 64 u, swap ref, b> 
+dup hashu rot ed25519_sign_uint
+<b swap B, swap <s s, b> <s
+recv_external contract_code 3 roll c7 runvmctx swap
+} : bare_transfer
+// storage src_private_key src_pubkey dest_pubkey amount -> new_storage
+{ bare_transfer 0 should_be } : transfer
+
+contract_storage first_owner_privkey first_owner_pubkey second_owner_pubkey 1 transfer 
+=: after_1st_transfer_state
+after_1st_transfer_state first_owner_pubkey balanceOf
+first_owner_balance fee_per_send - 1- should_be
+
+after_1st_transfer_state second_owner_pubkey balanceOf
+1 should_be
