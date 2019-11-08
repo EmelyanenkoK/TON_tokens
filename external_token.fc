@@ -7,7 +7,7 @@
   return (init, balances, fee_per_send, pending_queries); 
 }
 
-() save_data (cell balances, int fee_per_send, cell pending_queries) inline {
+() save_data (cell balances, int fee_per_send, cell pending_queries) impure inline {
   cell storage = begin_cell().store_int(-1, 1)
                              .store_dict(balances)
                              .store_grams(fee_per_send)
