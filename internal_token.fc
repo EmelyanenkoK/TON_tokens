@@ -15,7 +15,7 @@
   var msg = begin_cell()
 		.store_uint (0x18, 6)
 		.store_uint (0, 2 + 4 + 1 + 4 + 4 + 64 + 32 + 1 + 1)
-		.store_uint (operation & 0x80000000, 32)
+		.store_uint (operation | 0x80000000, 32)
 		.store_uint (query_id, 64)
             .end_cell();
   send_raw_message(msg, 64);
@@ -24,7 +24,7 @@
   var msg = begin_cell()
 		.store_uint (0x18, 6)
 		.store_uint (0, 2 + 4 + 1 + 4 + 4 + 64 + 32 + 1 + 1)
-		.store_uint (operation & 0x80000000, 32)
+		.store_uint (operation | 0x80000000, 32)
 		.store_uint (query_id, 64)
                 .store_slice (data) ;; TODO check empty bits
             .end_cell();
