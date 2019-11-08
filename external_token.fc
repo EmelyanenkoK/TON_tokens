@@ -17,6 +17,12 @@
 }
 
 int get_uniq_token () inline {
+  ;; TODO problem with this way of uniq_token calculation
+  ;; is that for contracts on different workchains but with
+  ;; the same address it gives the same token.
+  ;; Probably slice_hash(get_address())>>192 should be used instead
+  ;; Gas price should be checked as well, may be it is cheaper
+  ;; to load/store uniq_token
   (int wc, int hsh) = parse_address(get_address());
   return (hsh >> 192);
 }

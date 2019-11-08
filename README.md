@@ -12,4 +12,6 @@ Token on external messages. It only can process transfer requests outside of blo
 0. Fift scripts
 1. Mixed token: token which can be used by both contracts and external users.
 2. Fee providers market: mechanisms when pool of fee providers are formed (each with own price), then upon transfer best offer from pool is used, provider get tokens, user pay fee in tokens for the best price.
+3. `get_uniq_token` issue, check memo in code
+4. compare dictionary get,set/delete gas consumption with delete,add/none
 
