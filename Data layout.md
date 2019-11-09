@@ -8,9 +8,11 @@
 `sender_id` is pubkey
 ## Persistent storage
 `init?` - 1bit initialisation flag
+`description` - ref, cell with arbitrary content, contains data about token
 `balances` - dictionary `{sender_id -> balance}`
-`fee_per_send` - fee in tokens for every send
+`gas_per_send` - gas which should be bought by user for one send
 `recent_orders` - dictionary `{query_id -> 1}`
+`gas_providers` - dictionary `{bid_id -> (gram_balance, provider_id)}`, `bid_id` is price of nanograms per token
 
 
 

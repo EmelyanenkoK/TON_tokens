@@ -23,15 +23,18 @@
 0 =: workchain
 "p01.pk" nkp =: first_owner_pubkey =: first_owner_privkey 
 "p02.pk" nkp =: second_owner_pubkey =: second_owner_privkey 
+"p03.pk" nkp =: gas_provider_pubkey =: gas_provider_privkey 
 15 1000000000 * =: first_owner_balance
-100 =: fee_per_send
+20000 =: gas_per_send
+10000 =: gas_price
+1000000000 =: nanograms_per_token
 
 0xC7EAFBC106A7AA4BA3D16007C6AC64CAAC1078B4A43577339E246F466405E896 =: contract_address_int
 contract_address_int 6277101735386680763835789423207666416102355444464034512896 / constant uniq_token
 <b b{100} s, workchain 8 u, contract_address_int 256 u, b> <s =: contract_address_full
 0 tuple 0x076ef1ea , // magic
 0 , 0 , // actions msg_sents
-1570470873 , // unix_time
+now , // unix_time
 1 , 1 , 0 , // block_lt, trans_lt, rand_seed
  0 tuple 9223372036854775807 , dictnew , , // remaining balance
 contract_address_full , dictnew , // contract_address, global_config
@@ -47,7 +50,18 @@ dictnew
 256
 udict!
 drop
-<b 1 1 u, swap dict, fee_per_send Gram, dictnew dict, b> =: contract_storage 
+=: balances
+
+<b 1000 1000000000 * Gram, gas_provider_pubkey 256 u, b> <s
+nanograms_per_token 32 <<
+dictnew
+152
+udict!
+drop
+=: providers_pool
+
+
+<b 1 1 u, <b "Test Token" $>B B, b> ref, balances dict, gas_per_send Gram, dictnew dict, providers_pool dict, b> =: contract_storage 
 
 96915 =: balanceOf_code
 -1 =: recv_external
@@ -69,10 +83,16 @@ recv_external contract_code 3 roll c7 runvmctx swap
 // storage src_private_key src_pubkey dest_pubkey amount -> new_storage
 { bare_transfer 0 should_be } : transfer
 
-contract_storage first_owner_privkey first_owner_pubkey second_owner_pubkey 1 transfer 
+27 =: trasaction_amount
+gas_per_send gas_price * 	1000000000 *	  nanograms_per_token / =: transaction_fee
+contract_storage first_owner_privkey first_owner_pubkey second_owner_pubkey trasaction_amount transfer 
 =: after_1st_transfer_state
 after_1st_transfer_state first_owner_pubkey balanceOf
-first_owner_balance fee_per_send - 1- should_be
+first_owner_balance transaction_fee - trasaction_amount -
+should_be
 
 after_1st_transfer_state second_owner_pubkey balanceOf
-1 should_be
+trasaction_amount should_be
+
+after_1st_transfer_state gas_provider_pubkey balanceOf
+transaction_fee should_be

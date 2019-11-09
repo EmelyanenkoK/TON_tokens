@@ -1,26 +1,31 @@
 (slice) get_address () asm "MYADDR";
 (int, int) parse_address (slice) asm "REWRITESTDADDR";
+;; (int) gas_to_gram (int) asm "GASTOGRAM";
+(int) gas_to_gram (int gas) inline { return gas * 10000; }
 
-(int, cell, int, cell, cell) load_data () inline {
+(int, cell, int, cell, cell, cell) load_data () inline {
   var cs = get_data().begin_parse();
   (int init, 
+   cell description,
    cell balances, 
-   int fee_per_send, 
+   int gas_per_send, 
    cell pending_queries,
-   cell description) = (cs~load_int(1), 
-                        cs~load_dict(), 
-                        cs~load_grams(), 
-                        cs~load_dict(),
-                        cs~load_ref());
-  return (init, balances, fee_per_send, pending_queries); 
+   cell gas_providers) = (cs~load_int(1),
+                          cs~load_ref(), 
+                          cs~load_dict(), 
+                          cs~load_grams(), 
+                          cs~load_dict(),
+                          cs~load_dict());
+  return (init, balances, gas_per_send, pending_queries, description, gas_providers); 
 }
 
-() save_data (cell balances, int fee_per_send, cell pending_queries, cell description) impure inline {
+() save_data (cell balances, int gas_per_send, cell pending_queries, cell description, cell gas_providers) impure inline {
   cell storage = begin_cell().store_int(-1, 1)
-                             .store_dict(balances)
-                             .store_grams(fee_per_send)
-                             .store_dict(pending_queries)
                              .store_ref(description)
+                             .store_dict(balances)
+                             .store_grams(gas_per_send)
+                             .store_dict(pending_queries)
+                             .store_dict(gas_providers)
                  .end_cell();
   set_data(storage);
 }
@@ -83,11 +88,44 @@ int get_uniq_token () inline {
   return (balances, ());
 }
 
+(cell, ()) ~insert_new_gas_provider(cell gas_providers, int nanograms_per_token, int provided_grams, int provider_id, int gas_amount_per_send) inline {
+  throw_if(48, nanograms_per_token < 1);
+  int nanogram_amount_per_send = gas_to_gram(gas_amount_per_send);
+  throw_if(49, nanogram_amount_per_send < provided_grams);
+  int bid_id = ((nanograms_per_token + 1) << 32) - 1;
+  ifnot(gas_providers.dict_empty?()) {
+    do {
+      bid_id -= 1;
+      (slice value, int found) = gas_providers.udict_get?(152, bid_id);
+    } until ( ~ found );
+  }
+  gas_providers~udict_set_builder(152, bid_id, begin_cell().store_grams(provided_grams).store_uint(provider_id, 256) );
+  return (gas_providers, ());
+}
+
+((cell, cell), (int)) pay_for_gas((cell, cell) providers_n_balances, int gas_amount) inline {  
+  (cell gas_providers, cell balances) = providers_n_balances;
+  int nanogram_amount = gas_to_gram(gas_amount);
+  var (gas_providers, bid_id, provider_data, f) = gas_providers.udict_delete_get_max(152);
+  throw_unless(50, f);
+  (int provider_gram_balance, int provider_id) = (provider_data~load_grams(), provider_data~load_uint(256));
+  int nanograms_per_token = bid_id >> 32;
+  int token_amount = nanogram_amount * 1000000000 / nanograms_per_token ;
+  provider_gram_balance -= nanogram_amount;
+  ;; We just delete provider balances which are less than one send gas amount
+  ;; otherwise attacker can cause very expensive search for suitable provider 
+  if (provider_gram_balance > nanogram_amount) { 
+    gas_providers~udict_set_builder(152, bid_id, begin_cell().store_grams(provider_gram_balance).store_uint(provider_id, 256) );
+  }
+  balances~increase_balance(provider_id, token_amount);
+  return ((gas_providers, balances), (token_amount));
+}
+
 () recv_external (slice in_msg) {
-  (int init, cell balances, int fee_per_send, cell pending_queries, cell description) = load_data();
+  (int init, cell balances, int gas_per_send, cell pending_queries, cell description, cell gas_providers) = load_data();
   ifnot(init) {
     accept_message();
-    save_data(balances, fee_per_send, pending_queries);
+    save_data(balances, gas_per_send, pending_queries, description, gas_providers);
     return ();
   }
   slice signature = in_msg~load_bits(512);
@@ -107,11 +145,12 @@ int get_uniq_token () inline {
     int sender_id = pubkey; ;; just alias
     cs = cs~load_ref().begin_parse();
     (int amount, int payee_id) = (cs~load_grams(), cs~load_uint(256));
-    balances~decrease_balance(sender_id, amount + fee_per_send);
+    int fee = (gas_providers, balances)~pay_for_gas(gas_per_send);
+    balances~decrease_balance(sender_id, amount + fee);
     balances~increase_balance(payee_id, amount);
     pending_queries~remember_query(query_id);
     pending_queries~clean_expired_queries(bound);
-    save_data(balances, fee_per_send, pending_queries, description);     
+    save_data(balances, gas_per_send, pending_queries, description, gas_providers);     
     accept_message();  
   }
 }
@@ -121,7 +160,7 @@ int get_uniq_token () inline {
 }
 
 (int) balanceOf (int user_id) method_id {
-  (int init, cell balances, int fee_per_send, cell pending_queries) = load_data();
+  (int init, cell balances, int gas_per_send, cell pending_queries, cell description, cell gas_providers) = load_data();
   (slice user_balance_cell, int user_found) = balances.udict_get?(256, user_id);
   ifnot(user_found) {
     return 0;
