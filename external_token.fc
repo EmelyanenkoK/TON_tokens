@@ -1,17 +1,26 @@
 (slice) get_address () asm "MYADDR";
 (int, int) parse_address (slice) asm "REWRITESTDADDR";
 
-(int, cell, int, cell) load_data () inline {
+(int, cell, int, cell, cell) load_data () inline {
   var cs = get_data().begin_parse();
-  (int init, cell balances, int fee_per_send, cell pending_queries) = (cs~load_int(1), cs~load_dict(), cs~load_grams(), cs~load_dict());
+  (int init, 
+   cell balances, 
+   int fee_per_send, 
+   cell pending_queries,
+   cell description) = (cs~load_int(1), 
+                        cs~load_dict(), 
+                        cs~load_grams(), 
+                        cs~load_dict(),
+                        cs~load_ref());
   return (init, balances, fee_per_send, pending_queries); 
 }
 
-() save_data (cell balances, int fee_per_send, cell pending_queries) impure inline {
+() save_data (cell balances, int fee_per_send, cell pending_queries, cell description) impure inline {
   cell storage = begin_cell().store_int(-1, 1)
                              .store_dict(balances)
                              .store_grams(fee_per_send)
                              .store_dict(pending_queries)
+                             .store_ref(description)
                  .end_cell();
   set_data(storage);
 }
@@ -75,7 +84,7 @@ int get_uniq_token () inline {
 }
 
 () recv_external (slice in_msg) {
-  (int init, cell balances, int fee_per_send, cell pending_queries) = load_data();
+  (int init, cell balances, int fee_per_send, cell pending_queries, cell description) = load_data();
   ifnot(init) {
     accept_message();
     save_data(balances, fee_per_send, pending_queries);
@@ -102,7 +111,7 @@ int get_uniq_token () inline {
     balances~increase_balance(payee_id, amount);
     pending_queries~remember_query(query_id);
     pending_queries~clean_expired_queries(bound);
-    save_data(balances, fee_per_send, pending_queries);     
+    save_data(balances, fee_per_send, pending_queries, description);     
     accept_message();  
   }
 }
