@@ -31,6 +31,30 @@
   send_raw_message(msg, 64);
 }
 
+(cell, ()) ~decrease_balance(cell balances, int user_id, int amount) inline {
+  (slice user_balance_cell, int user_found) = balances~udict_delete_get?(256, user_id);
+  throw_unless(41, user_found);
+  int balance = user_balance_cell~load_grams();
+  ;; throw_if(42, balance < amount); useless since if final balance less than 0 exception during grams storing will be raised
+  balance -= amount;
+  if(balance) {
+    balances~udict_set_builder(256, user_id, begin_cell().store_grams(balance));
+  }
+  return (balances, ());
+}
+
+(cell, ()) ~increase_balance(cell balances, int user_id, int amount) inline {
+  (slice user_balance_cell, int user_found) = balances.udict_get?(256, user_id);
+  if(user_found) {
+    int balance = user_balance_cell~load_grams();
+    amount += balance;
+    ;; throw_if(46, new_payee_balance > 18446744073709551615); useless since if final balance higher than 2^120 exception during grams storing will be raised
+  }
+  if(amount) {
+    balances~udict_set_builder(256, user_id, begin_cell().store_grams(amount));
+  }
+  return (balances, ());
+}
 
 () recv_external (slice in_msg) {
   (int init, cell balances) = load_data();
@@ -60,27 +84,9 @@
   if (op == 1) {
     (int init, cell balances) = load_data();
     int sender_id = slice_hash(s_addr);
-    (slice sender_balance_cell, int sender_found) = balances.udict_get?(256, sender_id);
-    throw_unless(41, sender_found);
     (int query_id, int amount, int payee_id) = (in_msg~load_uint(64), in_msg~load_grams(), in_msg~load_uint(256));
-    int sender_balance =  sender_balance_cell~load_grams();
-    throw_if(42, amount > sender_balance);
-    (slice payee_balance_cell, int payee_found) = balances.udict_get?(256, payee_id);
-    int payee_balance = 0;
-    if(payee_found) {
-      payee_balance = payee_balance_cell~load_grams();
-    }
-    int new_payee_balance = payee_balance + amount;
-    throw_if(43, new_payee_balance > 18446744073709551615);
-    if(sender_balance == amount) {
-      balances~udict_delete?(256, sender_id);
-    } else {
-      balances~udict_set_builder(256, sender_id, begin_cell().store_grams(sender_balance - amount));
-    }
-    if(new_payee_balance > 0) {
-      ;; Zero-token transfers are not prohibited, but 0 balance will not be explicitly stored
-      balances~udict_set_builder(256, payee_id, begin_cell().store_grams(new_payee_balance));
-    }
+    balances~decrease_balance(sender_id, amount);
+    balances~increase_balance(payee_id, amount);    
     save_data(balances);
     bounce_message(op, query_id);
     return ();

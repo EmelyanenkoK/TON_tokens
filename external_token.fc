@@ -49,6 +49,30 @@ int get_uniq_token () inline {
   return (pending_queries, (need_save));
 }
 
+(cell, ()) ~decrease_balance(cell balances, int user_id, int amount) inline {
+  (slice user_balance_cell, int user_found) = balances~udict_delete_get?(256, user_id);
+  throw_unless(41, user_found);
+  int balance = user_balance_cell~load_grams();
+  ;; throw_if(42, balance < amount); useless since if final balance less than 0 exception during grams storing will be raised
+  balance -= amount;
+  if(balance) {
+    balances~udict_set_builder(256, user_id, begin_cell().store_grams(balance));
+  }
+  return (balances, ());
+}
+
+(cell, ()) ~increase_balance(cell balances, int user_id, int amount) inline {
+  (slice user_balance_cell, int user_found) = balances.udict_get?(256, user_id);
+  if(user_found) {
+    int balance = user_balance_cell~load_grams();
+    amount += balance;
+    ;; throw_if(46, new_payee_balance > 18446744073709551615); useless since if final balance higher than 2^120 exception during grams storing will be raised
+  }
+  if(amount) {
+    balances~udict_set_builder(256, user_id, begin_cell().store_grams(amount));
+  }
+  return (balances, ());
+}
 
 () recv_external (slice in_msg) {
   (int init, cell balances, int fee_per_send, cell pending_queries) = load_data();
@@ -65,35 +89,15 @@ int get_uniq_token () inline {
 
   int order_hash = slice_hash(in_msg);
   throw_unless(34, check_signature(order_hash, signature, pubkey));
-  int sender_id = pubkey; ;; just alias
   throw_unless(44, uniq_token == get_uniq_token());  
-  (slice sender_balance_cell, int sender_found) = balances.udict_get?(256, sender_id);
   (_, int has_query) = pending_queries.udict_get?(64, query_id);
   throw_if(47, has_query);
-  throw_unless(41, sender_found);
   if( op == 0 ) { ;; simple send
-    int sender_balance = sender_balance_cell~load_grams();
-    throw_if(42, sender_balance < fee_per_send);
-    sender_balance -= fee_per_send;
+    int sender_id = pubkey; ;; just alias
     cs = cs~load_ref().begin_parse();
     (int amount, int payee_id) = (cs~load_grams(), cs~load_uint(256));
-    throw_if(45, sender_balance < amount);
-    int payee_balance = 0;
-    (slice payee_balance_cell, int payee_found) = balances.udict_get?(256, payee_id);
-    if(payee_found) {
-      payee_balance = payee_balance_cell~load_grams();
-    }
-    int new_payee_balance = payee_balance + amount;
-    throw_if(46, new_payee_balance > 18446744073709551615);
-    if(sender_balance == amount) {
-      balances~udict_delete?(256, sender_id);
-    } else {
-      balances~udict_set_builder(256, sender_id, begin_cell().store_grams(sender_balance - amount));
-    }
-    if(new_payee_balance > 0) {
-      ;; Zero-token transfers are not prohibited, but 0 balance will not be explicitly stored
-      balances~udict_set_builder(256, payee_id, begin_cell().store_grams(new_payee_balance));
-    }
+    balances~decrease_balance(sender_id, amount + fee_per_send);
+    balances~increase_balance(payee_id, amount);
     pending_queries~remember_query(query_id);
     pending_queries~clean_expired_queries(bound);
     save_data(balances, fee_per_send, pending_queries);     
