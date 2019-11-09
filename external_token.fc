@@ -86,6 +86,8 @@ int get_uniq_token () inline {
   (int query_id, int op, int pubkey, int uniq_token) = (cs~load_uint(64), cs~load_uint(8), cs~load_uint(256), cs~load_uint(64));
   var bound = (now() << 32);
   throw_if(33, query_id < bound);  
+  throw_if(35, query_id > (bound + 281474976710656)); ;; Do not process orders which should be stored too long
+  ;; 281474976710656 = 2**48 = 65536 * 2**32 ~ 18 hours
 
   int order_hash = slice_hash(in_msg);
   throw_unless(34, check_signature(order_hash, signature, pubkey));
