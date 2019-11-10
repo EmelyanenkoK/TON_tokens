@@ -24,10 +24,12 @@
 "p01.pk" nkp =: first_owner_pubkey =: first_owner_privkey 
 "p02.pk" nkp =: second_owner_pubkey =: second_owner_privkey 
 "p03.pk" nkp =: gas_provider_pubkey =: gas_provider_privkey 
-15 1000000000 * =: first_owner_balance
+1000000000 =: GRAM
+150 GRAM * =: first_owner_balance
 20000 =: gas_per_send
 10000 =: gas_price
 1000000000 =: nanograms_per_token
+10000 =: credit_gas
 
 0xC7EAFBC106A7AA4BA3D16007C6AC64CAAC1078B4A43577339E246F466405E896 =: contract_address_int
 contract_address_int 6277101735386680763835789423207666416102355444464034512896 / constant uniq_token
@@ -78,17 +80,19 @@ first_owner_balance should_be
 <b now 32 u, 0 100000 random_int 32 u, 0 8 u, rot 256 u, uniq_token 64 u, swap ref, b> 
 dup hashu rot ed25519_sign_uint
 <b swap B, swap <s s, b> <s
-recv_external contract_code 3 roll c7 runvmctx swap
+recv_external contract_code 3 roll c7 credit_gas gasrunvmctx drop swap
 } : bare_transfer
 // storage src_private_key src_pubkey dest_pubkey amount -> new_storage
 { bare_transfer 0 should_be } : transfer
 
-27 =: trasaction_amount
+2 GRAM * =: trasaction_amount
 gas_per_send gas_price * 	1000000000 *	  nanograms_per_token / =: transaction_fee
 contract_storage first_owner_privkey first_owner_pubkey second_owner_pubkey trasaction_amount transfer 
 =: after_1st_transfer_state
+
+first_owner_balance transaction_fee - trasaction_amount - =: balance_after_1st_transfer
 after_1st_transfer_state first_owner_pubkey balanceOf
-first_owner_balance transaction_fee - trasaction_amount -
+balance_after_1st_transfer
 should_be
 
 after_1st_transfer_state second_owner_pubkey balanceOf
@@ -96,3 +100,45 @@ trasaction_amount should_be
 
 after_1st_transfer_state gas_provider_pubkey balanceOf
 transaction_fee should_be
+
+
+
+7 =: transaction_amount2
+after_1st_transfer_state second_owner_privkey second_owner_pubkey first_owner_pubkey transaction_amount2 transfer 
+=: after_2st_transfer_state
+
+after_2st_transfer_state second_owner_pubkey balanceOf
+trasaction_amount transaction_amount2 - transaction_fee - should_be
+
+after_2st_transfer_state gas_provider_pubkey balanceOf
+transaction_fee 2 * should_be
+
+
+
+transaction_fee =: transaction_amount3
+after_2st_transfer_state gas_provider_privkey gas_provider_pubkey first_owner_pubkey transaction_amount3 transfer 
+=: after_3rd_transfer_state
+
+after_3rd_transfer_state gas_provider_pubkey balanceOf
+transaction_fee should_be // there was 2*tf, sent 1*tf, fee is 1*tf but it is paid back
+
+after_3rd_transfer_state first_owner_pubkey balanceOf
+balance_after_1st_transfer transaction_amount2 + transaction_amount3 + should_be
+
+
+41 =: transaction_amount4
+after_3rd_transfer_state first_owner_privkey first_owner_pubkey gas_provider_pubkey transaction_amount4 transfer 
+=: after_4th_transfer_state
+
+after_4th_transfer_state gas_provider_pubkey balanceOf
+transaction_fee 2 * transaction_amount4 + should_be 
+
+after_4th_transfer_state first_owner_pubkey balanceOf
+balance_after_1st_transfer
+  transaction_amount2 +
+  transaction_amount3 +
+  transaction_fee -
+  transaction_amount4 -
+should_be
+
+

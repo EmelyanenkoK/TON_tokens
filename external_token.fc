@@ -1,6 +1,7 @@
 (slice) get_address () asm "MYADDR";
 (int, int) parse_address (slice) asm "REWRITESTDADDR";
 ;; (int) gas_to_gram (int) asm "GASTOGRAM";
+(builder) builder_stub () asm "NULL";
 (int) gas_to_gram (int gas) inline { return gas * 10000; }
 
 (int, cell, int, cell, cell, cell) load_data () inline {
@@ -29,6 +30,7 @@
                  .end_cell();
   set_data(storage);
 }
+
 
 int get_uniq_token () inline {
   ;; TODO problem with this way of uniq_token calculation
@@ -65,7 +67,7 @@ int get_uniq_token () inline {
 
 (cell, ()) ~decrease_balance(cell balances, int user_id, int amount) inline {
   (slice user_balance_cell, int user_found) = balances~udict_delete_get?(256, user_id);
-  throw_unless(41, user_found);
+  ;; throw_unless(41, user_found); will be thrown automatically if user not found during load_grams
   int balance = user_balance_cell~load_grams();
   ;; throw_if(42, balance < amount); useless since if final balance less than 0 exception during grams storing will be raised
   balance -= amount;
@@ -121,6 +123,86 @@ int get_uniq_token () inline {
   return ((gas_providers, balances), (token_amount));
 }
 
+((cell, cell), ()) process_transfer_with_accept((cell, cell) providers_n_balances, int sender_id, int payee_id, int amount, int gas_amount) inline { 
+  throw_if(52, payee_id == sender_id);    ;;There is no sense in supporting of such transfer, while it become too cumbersome
+
+  ;; ========= Gas provider ==========
+  (cell gas_providers, cell balances) = providers_n_balances;
+  int nanogram_amount = gas_to_gram(gas_amount);
+  var (gas_providers, bid_id, provider_data, f) = gas_providers.udict_delete_get_max(152);
+  ;; throw_unless(50, f); will throw on loads
+  (int provider_gram_balance, int provider_id) = (provider_data~load_grams(), provider_data~load_uint(256));
+  int nanograms_per_token = bid_id >> 32;
+  int fee_in_tokens = nanogram_amount * 1000000000 / nanograms_per_token ;
+  provider_gram_balance -= nanogram_amount;
+
+  ;; ========= Sender ==========
+  (slice sender_balance_cell, int user_found) = balances~udict_delete_get?(256, sender_id);
+  ;; throw_unless(41, user_found); will be thrown automatically if user not found during load_grams
+  int sender_balance = sender_balance_cell~load_grams();
+  ;; throw_if(42, balance < amount); useless since if final balance less than 0 exception during grams storing will be raised
+  sender_balance -= amount + fee_in_tokens;
+
+  ;; ========= Payee ==========
+  (slice payee_balance_cell, int payee_found) = balances.udict_get?(256, payee_id);
+  int payee_balance = amount;
+  if(payee_found) {
+    payee_balance += payee_balance_cell~load_grams();
+    ;; throw_if(46, new_payee_balance > 18446744073709551615); useless since if final balance higher than 2^120 exception during grams storing will be raised
+  }
+
+  ;; ======= Checking id collusions ==========
+  int replenish_provider_balance = -1;
+  if(sender_id == provider_id) {
+    replenish_provider_balance = 0;
+    sender_balance += fee_in_tokens;
+  } 
+  if(payee_id == provider_id) {
+    replenish_provider_balance = 0;
+    payee_balance += fee_in_tokens;
+  } 
+
+  int provider_balance = fee_in_tokens;
+  if(replenish_provider_balance) {
+    ;; ========= Provider ==========
+    (slice provider_balance_cell, int provider_found) = balances.udict_get?(256, provider_id);    
+    if(provider_found) {
+      provider_balance += provider_balance_cell~load_grams();
+      ;; throw_if(46, new_payee_balance > 18446744073709551615); useless since if final balance higher than 2^120 exception during grams storing will be raised
+    }
+  }
+
+
+  ;; ======= Builder generation ========
+  builder sender_data = begin_cell().store_grams(sender_balance);
+  builder payee_data = begin_cell().store_grams(payee_balance);
+  builder provider_token_data = builder_stub();
+  if(replenish_provider_balance) {
+    provider_token_data = begin_cell().store_grams(provider_balance);
+  }
+  builder provider_gas_data = begin_cell().store_grams(provider_gram_balance).store_uint(provider_id, 256);
+
+  accept_message();
+  
+  ;; ====== Storing builders ======
+  
+  if(sender_balance) {
+    balances~udict_set_builder(256, sender_id, sender_data);
+  }
+  if(payee_balance) {
+    balances~udict_set_builder(256, payee_id, payee_data);
+  }
+  if(replenish_provider_balance) {
+    balances~udict_set_builder(256, provider_id, provider_token_data);
+  }
+  ;; We just delete provider balances which are less than one send gas amount
+  ;; otherwise attacker can cause very expensive search for suitable provider 
+  if (provider_gram_balance > nanogram_amount) { 
+    gas_providers~udict_set_builder(152, bid_id, begin_cell().store_grams(provider_gram_balance).store_uint(provider_id, 256) );
+  }
+  return ((gas_providers, balances), ());
+}
+
 () recv_external (slice in_msg) {
   (int init, cell balances, int gas_per_send, cell pending_queries, cell description, cell gas_providers) = load_data();
   ifnot(init) {
@@ -145,13 +227,15 @@ int get_uniq_token () inline {
     int sender_id = pubkey; ;; just alias
     cs = cs~load_ref().begin_parse();
     (int amount, int payee_id) = (cs~load_grams(), cs~load_uint(256));
-    int fee = (gas_providers, balances)~pay_for_gas(gas_per_send);
-    balances~decrease_balance(sender_id, amount + fee);
-    balances~increase_balance(payee_id, amount);
+    ;; Unfortunately it consumes too much gas
+    ;;int fee = (gas_providers, balances)~pay_for_gas(gas_per_send);
+    ;;balances~decrease_balance(sender_id, amount + fee);
+    ;;balances~increase_balance(payee_id, amount);
+    ;;accept_message();  
+    (gas_providers, balances)~process_transfer_with_accept(sender_id, payee_id, amount, gas_per_send);
     pending_queries~remember_query(query_id);
     pending_queries~clean_expired_queries(bound);
     save_data(balances, gas_per_send, pending_queries, description, gas_providers);     
-    accept_message();  
   }
 }
 

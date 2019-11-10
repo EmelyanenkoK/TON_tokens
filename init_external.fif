@@ -5,7 +5,11 @@
 $1 parse-int =: workchain
 $2 parse-int =: first_owner_pubkey
 $3 $>GR =: first_owner_balance
-$4 $>GR =: fee_per_send
+$4 $>GR =: gas_per_send
+$5 parse-int =: gas_provider_pubkey
+$6 parse-int =: nanograms_per_token
+
+
 
 
 
@@ -17,8 +21,17 @@ dictnew
 256
 udict!
 drop
+=: balances
 
-<b 0 1 u, swap dict, fee_per_send Gram, dictnew dict, b> =: contract_storage 
+<b 1000 1000000000 * Gram, gas_provider_pubkey 256 u, b> <s
+nanograms_per_token 32 <<
+dictnew
+152
+udict!
+drop
+=: providers_pool
+
+<b 0 1 u, <b "Test Token" $>B B, b> ref, balances dict, gas_per_send Gram, dictnew dict, providers_pool dict, b> =: contract_storage 
 <b b{00110} s, <b contract_code s, b> ref, contract_storage ref, b>
 dup =: state_init
 
